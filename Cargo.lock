@@ -587,7 +587,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "ids-daps"
+name = "ids-daps-client"
 version = "0.1.0"
 dependencies = [
  "anyhow",

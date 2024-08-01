@@ -1,7 +1,14 @@
 [package]
-name = "ids-daps"
-version = "0.1.0"
 edition = "2021"
+
+name = "ids-daps-client"
+description = "A client to connect with the IDS DAPS."
+version = "0.1.0"
+license-file = "LICENSE"
+repository = "https://github.com/truzzt/ids-daps-client-rs"
+readme = "README.md"
+authors = ["Maximilian Schoenenberg <maximilian@schoenenberg.email>"]
+keywords = ["ids", "daps", "client", "dataspace"]
 
 [dependencies]
 anyhow = "1.0.86"

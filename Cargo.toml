@@ -1,0 +1,26 @@
+[package]
+name = "ids-daps"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+anyhow = "1.0.86"
+async-lock = "3.4.0"
+async-trait = "0.1.81"
+chrono = { version = "0.4.38", default-features = false, features = ["serde", "clock", "std"] }
+derive_builder = "0.20.0"
+jsonwebtoken = "9.3.0"
+openssl = "0.10.66"
+reqwest = { version = "0.12.5", features = ["json"], optional = true}
+serde = { version = "1.0.204", features = ["derive"] }
+thiserror = "1"
+tracing = "0.1.40"
+url = "2.5.2"
+uuid = { version = "1.10.0", features = ["v7"] }
+
+[dev-dependencies]
+tokio = { version = "1.39.2", features = ["macros", "rt-multi-thread"] }
+tracing-subscriber = { version = "0.3.18", features = ["env-filter"] }
+
+[features]
+default = ["dep:reqwest"]

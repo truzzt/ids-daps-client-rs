@@ -1,5 +1,6 @@
-#![deny(unsafe_code, rust_2018_idioms)]
-#![warn(rust_2024_compatibility)]
+#![deny(unsafe_code, rust_2018_idioms, clippy::unwrap_used)]
+#![warn(rust_2024_compatibility, clippy::pedantic)]
+#![allow(clippy::missing_errors_doc, clippy::missing_panics_doc)]
 
 pub mod cert;
 mod http_client;
@@ -60,8 +61,6 @@ pub struct DatClaims {
 
 #[derive(thiserror::Error, Debug)]
 pub enum DapsError {
-    #[error("reqwest error: {0}")]
-    Reqwest(#[from] reqwest::Error),
     #[error("http client error: {0}")]
     DapsHttpClient(#[from] http_client::DapsHttpClientError),
     #[error("jwt error")]
@@ -92,12 +91,16 @@ impl DapsConfigBuilder<'_> {
         if self.token_url.is_none() {
             return Err("Token URL is empty".to_string());
         } else if let Some(token_url) = self.token_url.clone() {
-            token_url.parse::<url::Url>().map_err(|e| format!("Token URL is invalid: {}", e))?;
+            token_url
+                .parse::<url::Url>()
+                .map_err(|e| format!("Token URL is invalid: {e}"))?;
         }
         if self.certs_url.is_none() {
             return Err("Certs URL is empty".to_string());
         } else if let Some(certs_url) = self.certs_url.clone() {
-            certs_url.parse::<url::Url>().map_err(|e| format!("Certs URL is invalid: {}", e))?;
+            certs_url
+                .parse::<url::Url>()
+                .map_err(|e| format!("Certs URL is invalid: {e}"))?;
         }
         if self.private_key.is_none() {
             return Err("Private key path is empty".to_string());
@@ -119,8 +122,7 @@ struct CertificatesCache {
 }
 
 /// An alias for the DAPS client using the Reqwest HTTP client.
-pub type ReqwestDapsClient<'a> =
-DapsClient<'a, http_client::reqwest_client::ReqwestDapsClient>;
+pub type ReqwestDapsClient<'a> = DapsClient<'a, http_client::reqwest_client::ReqwestDapsClient>;
 
 /// The main struct of this crate. It provides the functionality to request and validate DAT tokens
 /// from a DAPS.
@@ -150,13 +152,14 @@ where
     C: http_client::DapsClientRequest,
 {
     /// Creates a new DAPS client based on the given configuration.
+    #[must_use]
     pub fn new(config: &DapsConfig<'_>) -> Self {
         // Read sub and private key from file
         let (ski_aki, private_key) = cert::ski_aki_and_private_key_from_file(
             config.private_key.as_ref(),
             config.private_key_password.as_deref().unwrap_or(""),
         )
-            .expect("Reading SKI:AKI failed");
+        .expect("Reading SKI:AKI failed");
 
         // Use private key to create the encoding key
         let encoding_key = jsonwebtoken::EncodingKey::from_rsa_der(private_key.as_ref());
@@ -170,21 +173,13 @@ where
             encoding_key,
             uuid_context: uuid::ContextV7::new(),
             certs_cache: async_lock::RwLock::new(CertificatesCache {
-                stored: chrono::DateTime::from_timestamp(0, 0).unwrap(),
-                jwks: jsonwebtoken::jwk::JwkSet {
-                    keys: Vec::new(),
-                },
+                stored: chrono::DateTime::from_timestamp(0, 0).expect("This is a valid timestamp"),
+                jwks: jsonwebtoken::jwk::JwkSet { keys: Vec::new() },
             }),
             cache_ttl: chrono::Duration::seconds(config.certs_cache_ttl),
-
         }
     }
-}
 
-impl<C> DapsClient<'_, C>
-where
-    C: http_client::DapsClientRequest,
-{
     /// Validates a DAT token against the DAPS.
     pub async fn validate_dat(
         &self,
@@ -227,19 +222,19 @@ where
         let now = chrono::Utc::now();
         let now_secs = now.timestamp();
         let now_subsec_nanos = now.timestamp_subsec_nanos();
+        #[allow(clippy::cast_sign_loss)]
+        let uuid_timestamp = uuid::Timestamp::from_unix(
+            &self.uuid_context,
+            now_secs as u64,
+            now_subsec_nanos,
+        );
 
         // Create a JWT for the client assertion
         let header = jsonwebtoken::Header::new(jsonwebtoken::Algorithm::RS256);
         let claims = TokenClaims {
             context_: "https://w3id.org/idsa/contexts/context.jsonld".to_string(),
             type_: "ids:DatRequestToken".to_string(),
-            jti: uuid::Uuid::new_v7(uuid::Timestamp::from_unix(
-                &self.uuid_context,
-                now_secs as u64,
-                now_subsec_nanos,
-            ))
-                .hyphenated()
-                .to_string(),
+            jti: uuid::Uuid::new_v7(uuid_timestamp).hyphenated().to_string(),
             iss: self.sub.to_string(),
             sub: self.sub.to_string(),
             id: self.sub.to_string(),
@@ -317,11 +312,20 @@ mod test {
 
         // Create DAPS config
         let config = DapsConfigBuilder::create_empty()
-            .certs_url("https://daps.dev.mobility-dataspace.eu/realms/DAPS/protocol/openid-connect/certs".to_string())
-            .token_url("https://daps.dev.mobility-dataspace.eu/realms/DAPS/protocol/openid-connect/token")
-            .private_key(std::path::Path::new("./testdata/connector-certificate-3.p12"))
+            .certs_url(
+                "https://daps.dev.mobility-dataspace.eu/realms/DAPS/protocol/openid-connect/certs"
+                    .to_string(),
+            )
+            .token_url(
+                "https://daps.dev.mobility-dataspace.eu/realms/DAPS/protocol/openid-connect/token",
+            )
+            .private_key(std::path::Path::new(
+                "./testdata/connector-certificate-3.p12",
+            ))
             .private_key_password(Some(Cow::from("Password1")))
-            .scope(Cow::from("https://daps.dev.mobility-dataspace.eu/realms/DAPS"))
+            .scope(Cow::from(
+                "https://daps.dev.mobility-dataspace.eu/realms/DAPS",
+            ))
             .certs_cache_ttl(1)
             .build()
             .expect("Failed to build DapsConfig");

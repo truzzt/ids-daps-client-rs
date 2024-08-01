@@ -1,10 +1,12 @@
 //! This module provides functions to work with DAPS certificates.
 
+type SkiAkiPrivateKey<'a> = (std::borrow::Cow<'a, str>, std::borrow::Cow<'a, [u8]>);
+
 /// Reads a .p12 from file, extracts the certificate and returns the SKI:AKI
 pub fn ski_aki_and_private_key_from_file<'a>(
     p12_file_path: &std::path::Path,
     password: &str,
-) -> Result<(std::borrow::Cow<'a, str>, std::borrow::Cow<'a, [u8]>), Box<dyn std::error::Error>> {
+) -> Result<SkiAkiPrivateKey<'a>, Box<dyn std::error::Error>> {
     use std::io::Read;
 
     // Read the .p12 file
@@ -18,7 +20,7 @@ pub fn ski_aki_and_private_key_from_file<'a>(
 
     // Extract the SKI:AKI from the certificate
     let ski_aki_str = ski_aki(
-        parsed_pkcs12
+        &parsed_pkcs12
             .cert
             .ok_or("Certificate not found in .p12 file")?,
     )?;
@@ -37,14 +39,14 @@ pub fn ski_aki_and_private_key_from_file<'a>(
  * Subject Key Identifier* and *Authority Key Identifier*, respectively.
  */
 pub fn ski_aki<'a>(
-    x509: openssl::x509::X509,
+    x509: &openssl::x509::X509,
 ) -> Result<std::borrow::Cow<'a, str>, Box<dyn std::error::Error>> {
     let ski = x509
         .subject_key_id()
         .expect("SKI is required to exist in Certificate")
         .as_slice()
         .iter()
-        .map(|b| format!("{:02X}", b))
+        .map(|b| format!("{b:02X}"))
         .collect::<Vec<String>>()
         .join(":");
 
@@ -53,7 +55,7 @@ pub fn ski_aki<'a>(
         .expect("AKI is required to exist in Certificate")
         .as_slice()
         .iter()
-        .map(|b| format!("{:02X}", b))
+        .map(|b| format!("{b:02X}"))
         .collect::<Vec<String>>()
         .join(":");
 

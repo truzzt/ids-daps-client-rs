@@ -10,15 +10,16 @@ readme = "README.md"
 authors = ["Maximilian Schoenenberg <maximilian@schoenenberg.email>"]
 keywords = ["ids", "daps", "client", "dataspace"]
 
+exclude = ["testdata/*"]
+
 [dependencies]
-anyhow = "1.0.86"
 async-lock = "3.4.0"
 async-trait = "0.1.81"
-chrono = { version = "0.4.38", default-features = false, features = ["serde", "clock", "std"] }
+chrono = { version = "0.4.38", default-features = false, features = ["clock"] }
 derive_builder = "0.20.0"
 jsonwebtoken = "9.3.0"
 openssl = "0.10.66"
-reqwest = { version = "0.12.5", features = ["json"], optional = true}
+reqwest = { version = "0.12.5", features = ["json", "http2"], optional = true}
 serde = { version = "1.0.204", features = ["derive"] }
 thiserror = "1"
 tracing = "0.1.40"

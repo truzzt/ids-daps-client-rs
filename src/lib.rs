@@ -223,11 +223,8 @@ where
         let now_secs = now.timestamp();
         let now_subsec_nanos = now.timestamp_subsec_nanos();
         #[allow(clippy::cast_sign_loss)]
-        let uuid_timestamp = uuid::Timestamp::from_unix(
-            &self.uuid_context,
-            now_secs as u64,
-            now_subsec_nanos,
-        );
+        let uuid_timestamp =
+            uuid::Timestamp::from_unix(&self.uuid_context, now_secs as u64, now_subsec_nanos);
 
         // Create a JWT for the client assertion
         let header = jsonwebtoken::Header::new(jsonwebtoken::Algorithm::RS256);
@@ -305,26 +302,38 @@ mod test {
 
     #[tokio::test]
     async fn integration_test() {
+        use testcontainers::runners::AsyncRunner;
+
         // Setting up logger to debug issues
         tracing_subscriber::fmt()
             .with_env_filter(tracing_subscriber::EnvFilter::new("ids_daps=DEBUG"))
             .init();
 
+        // Starting test DAPS
+        let image = testcontainers::GenericImage::new("ghcr.io/ids-basecamp/test-daps", "0.0.1"); // TODO: Change to correct image
+        let container = image
+            .with_exposed_port(8080.into()) // will default to TCP protocol
+            .with_wait_for(testcontainers::core::WaitFor::message_on_stdout(
+                "Started Application in",
+            )) // TODO: Change to correct message
+            .start()
+            .await?;
+
         // Create DAPS config
         let config = DapsConfigBuilder::create_empty()
             .certs_url(
-                "https://daps.dev.mobility-dataspace.eu/realms/DAPS/protocol/openid-connect/certs"
+                "http://localhost:8080/realms/DAPS/protocol/openid-connect/certs" // TODO: Change to correct URL
                     .to_string(),
             )
             .token_url(
-                "https://daps.dev.mobility-dataspace.eu/realms/DAPS/protocol/openid-connect/token",
+                "http://localhost:8080/realms/DAPS/protocol/openid-connect/token", // TODO: Change to correct URL
             )
             .private_key(std::path::Path::new(
-                "./testdata/connector-certificate-3.p12",
+                "./testdata/connector-certificate.p12", // TODO: Put certificate into the /testdata folder (from root of the repository)
             ))
             .private_key_password(Some(Cow::from("Password1")))
             .scope(Cow::from(
-                "https://daps.dev.mobility-dataspace.eu/realms/DAPS",
+                "https://daps.dev.mobility-dataspace.eu/realms/DAPS", // TODO: Check if scope can stay the same
             ))
             .certs_cache_ttl(1)
             .build()

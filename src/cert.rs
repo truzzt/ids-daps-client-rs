@@ -70,10 +70,11 @@ mod tests {
     #[test]
     fn test_ski_aki() {
         let ski_aki = ski_aki_and_private_key_from_file(
-            std::path::Path::new("./testdata/connector-certificate-3.p12"),
+            std::path::Path::new("./testdata/connector-certificate.p12"),
             "Password1",
         )
         .expect("Reading SKI:AKI failed");
+        // TODO: Change SKI_AKI accordingly
         assert_eq!(ski_aki.0, "27:D9:DB:25:F6:0D:4A:CD:A3:13:17:01:8A:EC:1B:41:27:27:4D:1F:keyid:27:D9:DB:25:F6:0D:4A:CD:A3:13:17:01:8A:EC:1B:41:27:27:4D:1F");
     }
 }

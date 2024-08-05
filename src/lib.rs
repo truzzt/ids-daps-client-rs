@@ -309,15 +309,16 @@ mod test {
             .with_env_filter(tracing_subscriber::EnvFilter::new("ids_daps=DEBUG"))
             .init();
 
-        // Starting test DAPS
+        // Starting the test DAPS
         let image = testcontainers::GenericImage::new("ghcr.io/ids-basecamp/test-daps", "0.0.1"); // TODO: Change to correct image
-        let container = image
+        let _container = image
             .with_exposed_port(8080.into()) // will default to TCP protocol
             .with_wait_for(testcontainers::core::WaitFor::message_on_stdout(
                 "Started Application in",
             )) // TODO: Change to correct message
             .start()
-            .await?;
+            .await
+            .expect("Failed to start DAPS container");
 
         // Create DAPS config
         let config = DapsConfigBuilder::create_empty()
@@ -337,7 +338,7 @@ mod test {
             ))
             .certs_cache_ttl(1)
             .build()
-            .expect("Failed to build DapsConfig");
+            .expect("Failed to build DAPS-Config");
 
         // Create DAPS client
         let client: ReqwestDapsClient<'_> = DapsClient::new(&config);
@@ -345,23 +346,23 @@ mod test {
         // Now the test really starts...
         // Request a DAT token
         let dat = client.request_dat().await.unwrap();
-        println!("{:?}", dat);
+        tracing::info!("DAT Token: {:?}", dat);
 
         // Validate the DAT token
         let cache1_start = std::time::Instant::now();
         assert!(client.validate_dat(&dat).await.is_ok());
-        println!("First validation took {:?}", cache1_start.elapsed());
+        tracing::debug!("First validation took {:?}", cache1_start.elapsed());
 
         // Checking again to use cache
         let cache2_start = std::time::Instant::now();
         assert!(client.validate_dat(&dat).await.is_ok());
-        println!("Second validation took {:?}", cache2_start.elapsed());
+        tracing::debug!("Second validation took {:?}", cache2_start.elapsed());
 
         // Wait for cache to expire
         tokio::time::sleep(std::time::Duration::from_secs(2)).await;
         // Now the cache should be outdated
         let cache3_start = std::time::Instant::now();
         assert!(client.validate_dat(&dat).await.is_ok());
-        println!("Third validation took {:?}", cache3_start.elapsed());
+        tracing::debug!("Third validation took {:?}", cache3_start.elapsed());
     }
 }

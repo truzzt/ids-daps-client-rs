@@ -310,32 +310,31 @@ mod test {
             .init();
 
         // Starting the test DAPS
-        let image = testcontainers::GenericImage::new("ghcr.io/ids-basecamp/test-daps", "0.0.1"); // TODO: Change to correct image
+        let image = testcontainers::GenericImage::new("ghcr.io/ids-basecamp/daps", "test"); // TODO: Change to correct image
         let _container = image
-            .with_exposed_port(8080.into()) // will default to TCP protocol
+            .with_exposed_port(4567.into()) // will default to TCP protocol
             .with_wait_for(testcontainers::core::WaitFor::message_on_stdout(
-                "Started Application in",
-            )) // TODO: Change to correct message
+                "Listening on 0.0.0.0:4567, CTRL+C to stop",
+            ))
             .start()
             .await
             .expect("Failed to start DAPS container");
 
+        // Retrieve the host port mapped to the container's internal port 4567
+        let host = _container.get_host().await.unwrap();
+        let host_port = _container.get_host_port_ipv4(4567).await.unwrap();
+
+        // Construct URLs using the dynamically retrieved host and host_port
+        let certs_url = format!("http://{host}:{host_port}/.well-known/oauth-authorization-server");
+        let token_url = format!("http://{host}:{host_port}/token");
+
         // Create DAPS config
         let config = DapsConfigBuilder::create_empty()
-            .certs_url(
-                "http://localhost:8080/realms/DAPS/protocol/openid-connect/certs" // TODO: Change to correct URL
-                    .to_string(),
-            )
-            .token_url(
-                "http://localhost:8080/realms/DAPS/protocol/openid-connect/token", // TODO: Change to correct URL
-            )
-            .private_key(std::path::Path::new(
-                "./testdata/connector-certificate.p12", // TODO: Put certificate into the /testdata folder (from root of the repository)
-            ))
+            .certs_url(certs_url)
+            .token_url(token_url)
+            .private_key(std::path::Path::new("./testdata/connector-certificate.p12"))
             .private_key_password(Some(Cow::from("Password1")))
-            .scope(Cow::from(
-                "https://daps.dev.mobility-dataspace.eu/realms/DAPS", // TODO: Check if scope can stay the same
-            ))
+            .scope(Cow::from("idsc:IDS_CONNECTORS_ALL"))
             .certs_cache_ttl(1)
             .build()
             .expect("Failed to build DAPS-Config");

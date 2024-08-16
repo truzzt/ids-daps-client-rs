@@ -15,6 +15,3 @@ Cargo.lock
 
 # Ignore JetBrains files
 .idea/
-
-# Ignore test certificates for now
-testdata/

@@ -7,6 +7,15 @@ mod http_client;
 
 use std::borrow::Cow;
 
+use serde::Serialize;
+
+#[derive(Debug, serde::Deserialize, Serialize, Clone)]
+#[serde(untagged)]
+enum Audience {
+    Single(String),
+    Multiple(Vec<String>),
+}
+
 #[derive(Debug, serde::Serialize, Clone)]
 struct TokenClaims {
     #[serde(rename = "@type")]
@@ -33,7 +42,7 @@ pub struct TokenResponse {
 }
 
 /// Claims within the DAT token.
-#[derive(Debug, serde::Deserialize, Clone)]
+#[derive(Debug, serde::Deserialize, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 #[allow(dead_code)]
 pub struct DatClaims {
@@ -52,7 +61,7 @@ pub struct DatClaims {
     #[serde(rename = "sub")]
     subject: String,
     #[serde(rename = "aud")]
-    audience: String,
+    audience: Audience,
     #[serde(rename = "iss")]
     issuer: String,
     #[serde(rename = "jti")]

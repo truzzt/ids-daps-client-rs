@@ -1,3 +1,64 @@
+//! # ids-daps
+//!
+//! The `ids-daps` crate provides a rust client for the Dynamic Attribute Token Service (DAPS) of
+//! the Reference Architecture Model 4 (RAM 4) of the International Data Spaces Association (IDSA).
+//!
+//! ## Usage
+//!
+//! ```
+//! use ids_daps_client::{DapsConfigBuilder, DapsClient, ReqwestDapsClient};
+//! # use testcontainers::runners::AsyncRunner;
+//!
+//! #[tokio::main]
+//! async fn main() -> Result<(), Box<dyn std::error::Error>> {
+//! #   // Let's start a DAPS for test purposes
+//! #   let image = testcontainers::GenericImage::new("ghcr.io/ids-basecamp/daps", "test");
+//! #   let container = image
+//! #       .with_exposed_port(4567.into()) // will default to TCP protocol
+//! #       .with_wait_for(testcontainers::core::WaitFor::message_on_stdout(
+//! #           "Listening on 0.0.0.0:4567, CTRL+C to stop",
+//! #       ))
+//! #       .start()
+//! #       .await
+//! #       .expect("Failed to start DAPS container");
+//! #
+//! #   // Retrieve the host port mapped to the container's internal port 4567
+//! #   let host = container.get_host().await.expect("Failed to get host");
+//! #   let host_port = container
+//! #       .get_host_port_ipv4(4567)
+//! #       .await
+//! #       .expect("Failed to get port");
+//! #
+//! #   // Construct URLs using the dynamically retrieved host and host_port
+//! #   let certs_url = format!("http://{host}:{host_port}/jwks.json");
+//! #   let token_url = format!("http://{host}:{host_port}/token");
+//! #
+//!     // Create a DAPS client configuration
+//!     let config = DapsConfigBuilder::default()
+//!         .certs_url(certs_url)
+//!         .token_url(token_url)
+//!         .private_key(std::path::Path::new("./testdata/connector-certificate.p12"))
+//!         .private_key_password(Some(std::borrow::Cow::from("Password1")))
+//!         .scope(std::borrow::Cow::from("idsc:IDS_CONNECTORS_ALL"))
+//!         .certs_cache_ttl(1)
+//!         .build()
+//!         .expect("Failed to build DAPS-Config");
+//!
+//!     // Create DAPS client
+//!     let client: ReqwestDapsClient<'_> = DapsClient::new(&config);
+//!
+//!     // Request a DAT token
+//!     let dat = client.request_dat().await?;
+//!     println!("DAT Token: {:?}", dat);
+//!
+//!     // Validate the DAT token
+//!     if client.validate_dat(&dat).await.is_ok() {
+//!         println!("Validation successful");
+//!     }
+//!
+//!     Ok(())
+//! }
+
 #![deny(unsafe_code, rust_2018_idioms, clippy::unwrap_used)]
 #![warn(rust_2024_compatibility, clippy::pedantic)]
 #![allow(clippy::missing_errors_doc, clippy::missing_panics_doc)]
@@ -7,10 +68,10 @@ mod http_client;
 
 use std::borrow::Cow;
 
-use serde::Serialize;
-
-#[derive(Debug, serde::Deserialize, Serialize, Clone)]
+/// The type of the audience field in the DAT token. It can be a single string or a list of strings.
+#[derive(Debug, serde::Deserialize, Clone)]
 #[serde(untagged)]
+#[allow(dead_code)]
 enum Audience {
     Single(String),
     Multiple(Vec<String>),
@@ -42,7 +103,7 @@ pub struct TokenResponse {
 }
 
 /// Claims within the DAT token.
-#[derive(Debug, serde::Deserialize, Clone, Serialize)]
+#[derive(Debug, serde::Deserialize, Clone)]
 #[serde(rename_all = "camelCase")]
 #[allow(dead_code)]
 pub struct DatClaims {

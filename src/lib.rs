@@ -271,6 +271,7 @@ where
         let mut cache = self.certs_cache.write().await;
         cache.jwks = jwks;
         cache.stored = chrono::Utc::now();
+        tracing::debug!("Cache updated");
         Ok(cache.jwks.clone())
     }
 
@@ -285,10 +286,8 @@ where
             // Cache is outdated, drop lock
             drop(cache);
 
-            // Update cache
-            let jwks = self.update_cert_cache().await;
-            tracing::debug!("Cache updated");
-            jwks
+            // Update cache & return jwks
+            self.update_cert_cache().await
         } else {
             tracing::debug!("Cache is up-to-date");
             Ok(cache.jwks.clone())
@@ -310,8 +309,8 @@ mod test {
             .init();
 
         // Starting the test DAPS
-        let image = testcontainers::GenericImage::new("ghcr.io/ids-basecamp/daps", "test"); // TODO: Change to correct image
-        let _container = image
+        let image = testcontainers::GenericImage::new("ghcr.io/ids-basecamp/daps", "test");
+        let container = image
             .with_exposed_port(4567.into()) // will default to TCP protocol
             .with_wait_for(testcontainers::core::WaitFor::message_on_stdout(
                 "Listening on 0.0.0.0:4567, CTRL+C to stop",
@@ -321,11 +320,14 @@ mod test {
             .expect("Failed to start DAPS container");
 
         // Retrieve the host port mapped to the container's internal port 4567
-        let host = _container.get_host().await.unwrap();
-        let host_port = _container.get_host_port_ipv4(4567).await.unwrap();
+        let host = container.get_host().await.expect("Failed to get host");
+        let host_port = container
+            .get_host_port_ipv4(4567)
+            .await
+            .expect("Failed to get port");
 
         // Construct URLs using the dynamically retrieved host and host_port
-        let certs_url = format!("http://{host}:{host_port}/.well-known/oauth-authorization-server");
+        let certs_url = format!("http://{host}:{host_port}/jwks.json");
         let token_url = format!("http://{host}:{host_port}/token");
 
         // Create DAPS config
@@ -349,7 +351,12 @@ mod test {
 
         // Validate the DAT token
         let cache1_start = std::time::Instant::now();
-        assert!(client.validate_dat(&dat).await.is_ok());
+        if let Err(err) = client.validate_dat(&dat).await {
+            tracing::error!("Validation failed: {:?}", err);
+            panic!("Validation failed");
+        } else {
+            assert!(client.validate_dat(&dat).await.is_ok());
+        }
         tracing::debug!("First validation took {:?}", cache1_start.elapsed());
 
         // Checking again to use cache

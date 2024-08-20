@@ -17,7 +17,6 @@ jobs:
     steps:
     - uses: actions/checkout@v4
     - name: Build
-      run: cargo build --verbose
-# Currently not, because we need to fix the integration test before...
-#     - name: Run tests
-#       run: cargo test --verbose
+      run: cargo build
+    - name: Run tests
+      run: cargo test

@@ -1,3 +1,64 @@
+//! # ids-daps
+//!
+//! The `ids-daps` crate provides a rust client for the Dynamic Attribute Token Service (DAPS) of
+//! the Reference Architecture Model 4 (RAM 4) of the International Data Spaces Association (IDSA).
+//!
+//! ## Usage
+//!
+//! ```
+//! use ids_daps_client::{DapsConfigBuilder, DapsClient, ReqwestDapsClient};
+//! # use testcontainers::runners::AsyncRunner;
+//!
+//! #[tokio::main]
+//! async fn main() -> Result<(), Box<dyn std::error::Error>> {
+//! #   // Let's start a DAPS for test purposes
+//! #   let image = testcontainers::GenericImage::new("ghcr.io/ids-basecamp/daps", "test");
+//! #   let container = image
+//! #       .with_exposed_port(4567.into()) // will default to TCP protocol
+//! #       .with_wait_for(testcontainers::core::WaitFor::message_on_stdout(
+//! #           "Listening on 0.0.0.0:4567, CTRL+C to stop",
+//! #       ))
+//! #       .start()
+//! #       .await
+//! #       .expect("Failed to start DAPS container");
+//! #
+//! #   // Retrieve the host port mapped to the container's internal port 4567
+//! #   let host = container.get_host().await.expect("Failed to get host");
+//! #   let host_port = container
+//! #       .get_host_port_ipv4(4567)
+//! #       .await
+//! #       .expect("Failed to get port");
+//! #
+//! #   // Construct URLs using the dynamically retrieved host and host_port
+//! #   let certs_url = format!("http://{host}:{host_port}/jwks.json");
+//! #   let token_url = format!("http://{host}:{host_port}/token");
+//! #
+//!     // Create a DAPS client configuration
+//!     let config = DapsConfigBuilder::default()
+//!         .certs_url(certs_url)
+//!         .token_url(token_url)
+//!         .private_key(std::path::Path::new("./testdata/connector-certificate.p12"))
+//!         .private_key_password(Some(std::borrow::Cow::from("Password1")))
+//!         .scope(std::borrow::Cow::from("idsc:IDS_CONNECTORS_ALL"))
+//!         .certs_cache_ttl(1)
+//!         .build()
+//!         .expect("Failed to build DAPS-Config");
+//!
+//!     // Create DAPS client
+//!     let client: ReqwestDapsClient<'_> = DapsClient::new(&config);
+//!
+//!     // Request a DAT token
+//!     let dat = client.request_dat().await?;
+//!     println!("DAT Token: {:?}", dat);
+//!
+//!     // Validate the DAT token
+//!     if client.validate_dat(&dat).await.is_ok() {
+//!         println!("Validation successful");
+//!     }
+//!
+//!     Ok(())
+//! }
+
 #![deny(unsafe_code, rust_2018_idioms, clippy::unwrap_used)]
 #![warn(rust_2024_compatibility, clippy::pedantic)]
 #![allow(clippy::missing_errors_doc, clippy::missing_panics_doc)]
@@ -6,6 +67,15 @@ pub mod cert;
 mod http_client;
 
 use std::borrow::Cow;
+
+/// The type of the audience field in the DAT token. It can be a single string or a list of strings.
+#[derive(Debug, serde::Deserialize, Clone)]
+#[serde(untagged)]
+#[allow(dead_code)]
+enum Audience {
+    Single(String),
+    Multiple(Vec<String>),
+}
 
 #[derive(Debug, serde::Serialize, Clone)]
 struct TokenClaims {
@@ -52,7 +122,7 @@ pub struct DatClaims {
     #[serde(rename = "sub")]
     subject: String,
     #[serde(rename = "aud")]
-    audience: String,
+    audience: Audience,
     #[serde(rename = "iss")]
     issuer: String,
     #[serde(rename = "jti")]
@@ -223,11 +293,8 @@ where
         let now_secs = now.timestamp();
         let now_subsec_nanos = now.timestamp_subsec_nanos();
         #[allow(clippy::cast_sign_loss)]
-        let uuid_timestamp = uuid::Timestamp::from_unix(
-            &self.uuid_context,
-            now_secs as u64,
-            now_subsec_nanos,
-        );
+        let uuid_timestamp =
+            uuid::Timestamp::from_unix(&self.uuid_context, now_secs as u64, now_subsec_nanos);
 
         // Create a JWT for the client assertion
         let header = jsonwebtoken::Header::new(jsonwebtoken::Algorithm::RS256);
@@ -274,6 +341,7 @@ where
         let mut cache = self.certs_cache.write().await;
         cache.jwks = jwks;
         cache.stored = chrono::Utc::now();
+        tracing::debug!("Cache updated");
         Ok(cache.jwks.clone())
     }
 
@@ -288,10 +356,8 @@ where
             // Cache is outdated, drop lock
             drop(cache);
 
-            // Update cache
-            let jwks = self.update_cert_cache().await;
-            tracing::debug!("Cache updated");
-            jwks
+            // Update cache & return jwks
+            self.update_cert_cache().await
         } else {
             tracing::debug!("Cache is up-to-date");
             Ok(cache.jwks.clone())
@@ -305,30 +371,45 @@ mod test {
 
     #[tokio::test]
     async fn integration_test() {
+        use testcontainers::runners::AsyncRunner;
+
         // Setting up logger to debug issues
         tracing_subscriber::fmt()
             .with_env_filter(tracing_subscriber::EnvFilter::new("ids_daps=DEBUG"))
             .init();
 
+        // Starting the test DAPS
+        let image = testcontainers::GenericImage::new("ghcr.io/ids-basecamp/daps", "test");
+        let container = image
+            .with_exposed_port(4567.into()) // will default to TCP protocol
+            .with_wait_for(testcontainers::core::WaitFor::message_on_stdout(
+                "Listening on 0.0.0.0:4567, CTRL+C to stop",
+            ))
+            .start()
+            .await
+            .expect("Failed to start DAPS container");
+
+        // Retrieve the host port mapped to the container's internal port 4567
+        let host = container.get_host().await.expect("Failed to get host");
+        let host_port = container
+            .get_host_port_ipv4(4567)
+            .await
+            .expect("Failed to get port");
+
+        // Construct URLs using the dynamically retrieved host and host_port
+        let certs_url = format!("http://{host}:{host_port}/jwks.json");
+        let token_url = format!("http://{host}:{host_port}/token");
+
         // Create DAPS config
         let config = DapsConfigBuilder::create_empty()
-            .certs_url(
-                "https://daps.dev.mobility-dataspace.eu/realms/DAPS/protocol/openid-connect/certs"
-                    .to_string(),
-            )
-            .token_url(
-                "https://daps.dev.mobility-dataspace.eu/realms/DAPS/protocol/openid-connect/token",
-            )
-            .private_key(std::path::Path::new(
-                "./testdata/connector-certificate-3.p12",
-            ))
+            .certs_url(certs_url)
+            .token_url(token_url)
+            .private_key(std::path::Path::new("./testdata/connector-certificate.p12"))
             .private_key_password(Some(Cow::from("Password1")))
-            .scope(Cow::from(
-                "https://daps.dev.mobility-dataspace.eu/realms/DAPS",
-            ))
+            .scope(Cow::from("idsc:IDS_CONNECTORS_ALL"))
             .certs_cache_ttl(1)
             .build()
-            .expect("Failed to build DapsConfig");
+            .expect("Failed to build DAPS-Config");
 
         // Create DAPS client
         let client: ReqwestDapsClient<'_> = DapsClient::new(&config);
@@ -336,23 +417,28 @@ mod test {
         // Now the test really starts...
         // Request a DAT token
         let dat = client.request_dat().await.unwrap();
-        println!("{:?}", dat);
+        tracing::info!("DAT Token: {:?}", dat);
 
         // Validate the DAT token
         let cache1_start = std::time::Instant::now();
-        assert!(client.validate_dat(&dat).await.is_ok());
-        println!("First validation took {:?}", cache1_start.elapsed());
+        if let Err(err) = client.validate_dat(&dat).await {
+            tracing::error!("Validation failed: {:?}", err);
+            panic!("Validation failed");
+        } else {
+            assert!(client.validate_dat(&dat).await.is_ok());
+        }
+        tracing::debug!("First validation took {:?}", cache1_start.elapsed());
 
         // Checking again to use cache
         let cache2_start = std::time::Instant::now();
         assert!(client.validate_dat(&dat).await.is_ok());
-        println!("Second validation took {:?}", cache2_start.elapsed());
+        tracing::debug!("Second validation took {:?}", cache2_start.elapsed());
 
         // Wait for cache to expire
         tokio::time::sleep(std::time::Duration::from_secs(2)).await;
         // Now the cache should be outdated
         let cache3_start = std::time::Instant::now();
         assert!(client.validate_dat(&dat).await.is_ok());
-        println!("Third validation took {:?}", cache3_start.elapsed());
+        tracing::debug!("Third validation took {:?}", cache3_start.elapsed());
     }
 }

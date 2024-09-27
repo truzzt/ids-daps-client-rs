@@ -63,7 +63,7 @@ pub fn ski_aki<'a>(
 }
 
 #[cfg(test)]
-mod tests {
+mod test {
     use super::*;
 
     /// Loads a certificate and extracts the SKI:AKI

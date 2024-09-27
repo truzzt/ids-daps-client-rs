@@ -40,7 +40,7 @@
 //!         .private_key(std::path::Path::new("./testdata/connector-certificate.p12"))
 //!         .private_key_password(Some(std::borrow::Cow::from("Password1")))
 //!         .scope(std::borrow::Cow::from("idsc:IDS_CONNECTORS_ALL"))
-//!         .certs_cache_ttl(1)
+//!         .certs_cache_ttl(1_u64)
 //!         .build()
 //!         .expect("Failed to build DAPS-Config");
 //!
@@ -49,7 +49,7 @@
 //!
 //!     // Request a DAT token
 //!     let dat = client.request_dat().await?;
-//!     println!("DAT Token: {:?}", dat);
+//!     println!("DAT Token: {dat}");
 //!
 //!     // Validate the DAT token
 //!     if client.validate_dat(&dat).await.is_ok() {
@@ -63,6 +63,7 @@
 #![warn(rust_2024_compatibility, clippy::pedantic)]
 #![allow(clippy::missing_errors_doc, clippy::missing_panics_doc)]
 
+mod cache;
 pub mod cert;
 mod http_client;
 
@@ -135,6 +136,8 @@ pub enum DapsError {
     DapsHttpClient(#[from] http_client::DapsHttpClientError),
     #[error("jwt error")]
     InvalidToken,
+    #[error("cache error: {0}")]
+    CacheError(#[from] cache::CertificatesCacheError),
 }
 
 /// Configuration for the DAPS client.
@@ -152,7 +155,7 @@ pub struct DapsConfig<'a> {
     /// The scope for the DAPS token.
     scope: Cow<'a, str>,
     /// The time-to-live for the certificates cache in seconds.
-    certs_cache_ttl: i64,
+    certs_cache_ttl: u64,
 }
 
 impl DapsConfigBuilder<'_> {
@@ -185,12 +188,6 @@ impl DapsConfigBuilder<'_> {
     }
 }
 
-/// A cache for the certificates of the DAPS.
-struct CertificatesCache {
-    stored: chrono::DateTime<chrono::Utc>,
-    jwks: jsonwebtoken::jwk::JwkSet,
-}
-
 /// An alias for the DAPS client using the Reqwest HTTP client.
 pub type ReqwestDapsClient<'a> = DapsClient<'a, http_client::reqwest_client::ReqwestDapsClient>;
 
@@ -212,9 +209,7 @@ pub struct DapsClient<'a, C> {
     /// The UUID context for the JWT. To generate ordered UUIDs (v7).
     uuid_context: uuid::ContextV7,
     /// A cache for the certificates of the DAPS.
-    certs_cache: async_lock::RwLock<CertificatesCache>,
-    /// TTL for the cache.
-    cache_ttl: chrono::Duration,
+    certs_cache: cache::CertificatesCache,
 }
 
 impl<C> DapsClient<'_, C>
@@ -242,11 +237,9 @@ where
             token_url: config.token_url.to_string(),
             encoding_key,
             uuid_context: uuid::ContextV7::new(),
-            certs_cache: async_lock::RwLock::new(CertificatesCache {
-                stored: chrono::DateTime::from_timestamp(0, 0).expect("This is a valid timestamp"),
-                jwks: jsonwebtoken::jwk::JwkSet { keys: Vec::new() },
-            }),
-            cache_ttl: chrono::Duration::seconds(config.certs_cache_ttl),
+            certs_cache: cache::CertificatesCache::new(std::time::Duration::from_secs(
+                config.certs_cache_ttl,
+            )),
         }
     }
 
@@ -338,29 +331,29 @@ where
     /// Updates the certificate cache with the Certificates requested from the DAPS.
     async fn update_cert_cache(&self) -> Result<jsonwebtoken::jwk::JwkSet, DapsError> {
         let jwks = self.client.get_certs(self.certs_url.as_ref()).await?;
-        let mut cache = self.certs_cache.write().await;
-        cache.jwks = jwks;
-        cache.stored = chrono::Utc::now();
-        tracing::debug!("Cache updated");
-        Ok(cache.jwks.clone())
+        self.certs_cache
+            .update(jwks.clone())
+            .await
+            .map_err(DapsError::from)
     }
 
     /// Returns the certificates from the cache or updates the cache if it is outdated.
     async fn get_certs(&self) -> Result<jsonwebtoken::jwk::JwkSet, DapsError> {
-        let now = chrono::Utc::now();
         tracing::debug!("Checking cache...");
 
-        let cache = self.certs_cache.read().await;
-        if cache.stored + self.cache_ttl < now {
-            tracing::info!("Cache is outdated, updating...");
-            // Cache is outdated, drop lock
-            drop(cache);
-
-            // Update cache & return jwks
-            self.update_cert_cache().await
-        } else {
-            tracing::debug!("Cache is up-to-date");
-            Ok(cache.jwks.clone())
+        match self.certs_cache.get().await {
+            Ok(cert) => {
+                tracing::debug!("Cache is up-to-date");
+                Ok(cert)
+            }
+            Err(cache::CertificatesCacheError::Outdated) => {
+                tracing::info!("Cache is outdated, updating...");
+                self.update_cert_cache().await
+            }
+            Err(cache::CertificatesCacheError::Empty) => {
+                tracing::info!("Cache is empty, updating...");
+                self.update_cert_cache().await
+            }
         }
     }
 }
@@ -407,7 +400,7 @@ mod test {
             .private_key(std::path::Path::new("./testdata/connector-certificate.p12"))
             .private_key_password(Some(Cow::from("Password1")))
             .scope(Cow::from("idsc:IDS_CONNECTORS_ALL"))
-            .certs_cache_ttl(1)
+            .certs_cache_ttl(1_u64)
             .build()
             .expect("Failed to build DAPS-Config");
 

@@ -4,7 +4,7 @@ edition = "2021"
 name = "ids-daps-client"
 description = "A client to connect with the IDS DAPS."
 version = "0.1.0"
-license-file = "LICENSE"
+license = "Apache-2.0"
 repository = "https://github.com/truzzt/ids-daps-client-rs"
 readme = "README.md"
 authors = ["Maximilian Schoenenberg <maximilian@schoenenberg.email>"]
@@ -20,7 +20,7 @@ derive_builder = "0.20.0"
 jsonwebtoken = "9.3.0"
 openssl = "0.10.66"
 reqwest = { version = "0.12.5", features = ["json", "http2"], optional = true}
-serde = { version = "1.0.204", features = ["derive"] }
+serde = { version = "1", features = ["derive"] }
 thiserror = "1"
 tracing = "0.1.40"
 url = "2.5.2"

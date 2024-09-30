@@ -3,7 +3,7 @@ edition = "2021"
 
 name = "ids-daps-client"
 description = "A client to connect with the IDS DAPS."
-version = "0.2.0"
+version = "0.2.1"
 license = "Apache-2.0"
 repository = "https://github.com/truzzt/ids-daps-client-rs"
 readme = "README.md"

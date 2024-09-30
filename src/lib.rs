@@ -45,7 +45,7 @@
 //!         .expect("Failed to build DAPS-Config");
 //!
 //!     // Create DAPS client
-//!     let client: ReqwestDapsClient<'_> = DapsClient::new(config);
+//!     let client: ReqwestDapsClient = DapsClient::new(&config);
 //!
 //!     // Request a DAT token
 //!     let dat = client.request_dat().await?;
@@ -67,8 +67,6 @@ mod cache;
 pub mod cert;
 pub mod config;
 mod http_client;
-
-use std::borrow::Cow;
 
 /// The type of the audience field in the DAT token. It can be a single string or a list of strings.
 #[derive(Debug, serde::Deserialize, Clone)]
@@ -142,15 +140,15 @@ pub enum DapsError {
 }
 
 /// An alias for the DAPS client using the Reqwest HTTP client.
-pub type ReqwestDapsClient<'a> = DapsClient<'a, http_client::reqwest_client::ReqwestDapsClient>;
+pub type ReqwestDapsClient = DapsClient<http_client::reqwest_client::ReqwestDapsClient>;
 
 /// The main struct of this crate. It provides the functionality to request and validate DAT tokens
 /// from a DAPS.
-pub struct DapsClient<'a, C> {
+pub struct DapsClient<C> {
     /// The HTTP client to use for requests. It is generic over the actual implementation.
     client: C,
     /// The subject of the client.
-    sub: Cow<'a, str>,
+    sub: String,
     /// The URL for the request of the certificates for validation.
     certs_url: String,
     /// The URL for the request of a DAPS token.
@@ -165,13 +163,13 @@ pub struct DapsClient<'a, C> {
     certs_cache: cache::CertificatesCache,
 }
 
-impl<C> DapsClient<'_, C>
+impl<C> DapsClient<C>
 where
     C: http_client::DapsClientRequest,
 {
     /// Creates a new DAPS client based on the given configuration.
     #[must_use]
-    pub fn new(config: config::DapsConfig<'_>) -> Self {
+    pub fn new(config: &config::DapsConfig<'_>) -> Self {
         // Read sub and private key from file
         let (ski_aki, private_key) = cert::ski_aki_and_private_key_from_file(
             config.private_key.as_ref(),
@@ -184,7 +182,7 @@ where
 
         Self {
             client: C::default(),
-            sub: ski_aki,
+            sub: ski_aki.to_string(),
             scope: config.scope.to_string(),
             certs_url: config.certs_url.to_string(),
             token_url: config.token_url.to_string(),
@@ -356,14 +354,14 @@ mod test {
             .certs_url(certs_url)
             .token_url(token_url)
             .private_key(std::path::Path::new("./testdata/connector-certificate.p12"))
-            .private_key_password(Some(Cow::from("Password1")))
-            .scope(Cow::from("idsc:IDS_CONNECTORS_ALL"))
+            .private_key_password(Some(std::borrow::Cow::from("Password1")))
+            .scope(std::borrow::Cow::from("idsc:IDS_CONNECTORS_ALL"))
             .certs_cache_ttl(1_u64)
             .build()
             .expect("Failed to build DAPS-Config");
 
         // Create DAPS client
-        let client: ReqwestDapsClient<'_> = DapsClient::new(config);
+        let client: ReqwestDapsClient = DapsClient::new(&config);
 
         // Now the test really starts...
         // Request a DAT token

@@ -3,6 +3,7 @@ use std::borrow::Cow;
 /// Configuration for the DAPS client.
 #[derive(Debug, derive_builder::Builder)]
 #[builder(setter(into), build_fn(validate = "Self::validate"))]
+#[allow(clippy::module_name_repetitions)]
 pub struct DapsConfig<'a> {
     /// The URL for the request of a DAPS token.
     pub(super) token_url: Cow<'a, str>,

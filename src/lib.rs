@@ -6,7 +6,7 @@
 //! ## Usage
 //!
 //! ```
-//! use ids_daps_client::{DapsConfigBuilder, DapsClient, ReqwestDapsClient};
+//! use ids_daps_client::{config::DapsConfigBuilder, DapsClient, ReqwestDapsClient};
 //! # use testcontainers::runners::AsyncRunner;
 //!
 //! #[tokio::main]
@@ -45,7 +45,7 @@
 //!         .expect("Failed to build DAPS-Config");
 //!
 //!     // Create DAPS client
-//!     let client: ReqwestDapsClient<'_> = DapsClient::new(&config);
+//!     let client: ReqwestDapsClient<'_> = DapsClient::new(config);
 //!
 //!     // Request a DAT token
 //!     let dat = client.request_dat().await?;
@@ -65,6 +65,7 @@
 
 mod cache;
 pub mod cert;
+pub mod config;
 mod http_client;
 
 use std::borrow::Cow;
@@ -140,54 +141,6 @@ pub enum DapsError {
     CacheError(#[from] cache::CertificatesCacheError),
 }
 
-/// Configuration for the DAPS client.
-#[derive(Debug, derive_builder::Builder)]
-#[builder(setter(into), build_fn(validate = "Self::validate"))]
-pub struct DapsConfig<'a> {
-    /// The URL for the request of a DAPS token.
-    token_url: Cow<'a, str>,
-    /// The URL for the request of the certificates for validation.
-    certs_url: Cow<'a, str>,
-    /// The local path to the private key file.
-    private_key: Cow<'a, std::path::Path>,
-    /// The password for the private key file.
-    private_key_password: Option<Cow<'a, str>>,
-    /// The scope for the DAPS token.
-    scope: Cow<'a, str>,
-    /// The time-to-live for the certificates cache in seconds.
-    certs_cache_ttl: u64,
-}
-
-impl DapsConfigBuilder<'_> {
-    /// Validates the configuration.
-    pub fn validate(&self) -> Result<(), String> {
-        if self.token_url.is_none() {
-            return Err("Token URL is empty".to_string());
-        } else if let Some(token_url) = self.token_url.clone() {
-            token_url
-                .parse::<url::Url>()
-                .map_err(|e| format!("Token URL is invalid: {e}"))?;
-        }
-        if self.certs_url.is_none() {
-            return Err("Certs URL is empty".to_string());
-        } else if let Some(certs_url) = self.certs_url.clone() {
-            certs_url
-                .parse::<url::Url>()
-                .map_err(|e| format!("Certs URL is invalid: {e}"))?;
-        }
-        if self.private_key.is_none() {
-            return Err("Private key path is empty".to_string());
-        }
-        if self.private_key_password.is_none() {
-            return Err("Private key password is empty".to_string());
-        }
-        if self.scope.is_none() {
-            return Err("Scope is empty".to_string());
-        }
-        Ok(())
-    }
-}
-
 /// An alias for the DAPS client using the Reqwest HTTP client.
 pub type ReqwestDapsClient<'a> = DapsClient<'a, http_client::reqwest_client::ReqwestDapsClient>;
 
@@ -218,7 +171,7 @@ where
 {
     /// Creates a new DAPS client based on the given configuration.
     #[must_use]
-    pub fn new(config: &DapsConfig<'_>) -> Self {
+    pub fn new(config: config::DapsConfig<'_>) -> Self {
         // Read sub and private key from file
         let (ski_aki, private_key) = cert::ski_aki_and_private_key_from_file(
             config.private_key.as_ref(),
@@ -298,7 +251,7 @@ where
             iss: self.sub.to_string(),
             sub: self.sub.to_string(),
             id: self.sub.to_string(),
-            aud: self.scope.clone(),
+            aud: self.scope.to_string(),
             iat: now_secs,
             exp: now_secs + 3600,
             nbf: now_secs,
@@ -326,6 +279,11 @@ where
             .await?;
 
         Ok(response.access_token)
+    }
+
+    /// Returns the `jsonwebtoken::jwk::JwkSet` either from the DAPS or from the cache.
+    pub async fn get_jwks(&self) -> Result<jsonwebtoken::jwk::JwkSet, DapsError> {
+        self.get_certs().await
     }
 
     /// Updates the certificate cache with the Certificates requested from the DAPS.
@@ -380,7 +338,7 @@ mod test {
             ))
             .start()
             .await
-            .expect("Failed to start DAPS container");
+            .expect("Failed to start DAPS container. Is Docker running?");
 
         // Retrieve the host port mapped to the container's internal port 4567
         let host = container.get_host().await.expect("Failed to get host");
@@ -394,7 +352,7 @@ mod test {
         let token_url = format!("http://{host}:{host_port}/token");
 
         // Create DAPS config
-        let config = DapsConfigBuilder::create_empty()
+        let config = config::DapsConfigBuilder::default()
             .certs_url(certs_url)
             .token_url(token_url)
             .private_key(std::path::Path::new("./testdata/connector-certificate.p12"))
@@ -405,7 +363,7 @@ mod test {
             .expect("Failed to build DAPS-Config");
 
         // Create DAPS client
-        let client: ReqwestDapsClient<'_> = DapsClient::new(&config);
+        let client: ReqwestDapsClient<'_> = DapsClient::new(config);
 
         // Now the test really starts...
         // Request a DAT token
